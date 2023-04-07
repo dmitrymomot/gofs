@@ -1,0 +1,34 @@
+# Github workflow syntax: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - "releases/**"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.19"
+
+      - name: Run tests
+        env:
+          STORAGE_KEY: ${{ secrets.STORAGE_KEY }}
+          STORAGE_SECRET: ${{ secrets.STORAGE_SECRET }}
+          STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
+          STORAGE_REGION: ${{ secrets.STORAGE_REGION }}
+          STORAGE_BUCKET: ${{ secrets.STORAGE_BUCKET }}
+          STORAGE_URL: ${{ secrets.STORAGE_URL }}
+          STORAGE_DISABLE_SSL: false
+          STORAGE_FORCE_PATH_STYLE: false
+        run: go test -p 1 -count=1 -race ./...
