@@ -12,27 +12,12 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Predefined ACL permissions
-const (
-	Public  ACL = s3.ObjectCannedACLPublicRead
-	Private ACL = s3.ObjectCannedACLPrivate
-)
-
-type (
-	// ACL permission
-	ACL string
-
-	// Interactor struct
-	Interactor struct {
-		s3             *s3.S3
-		bucket         string
-		url            string
-		forcePathStyle bool
-	}
-)
-
-func (a ACL) String() string {
-	return string(a)
+// Interactor struct
+type Interactor struct {
+	s3             *s3.S3
+	bucket         string
+	url            string
+	forcePathStyle bool
 }
 
 // New is a factory function,
@@ -94,8 +79,7 @@ func (i *Interactor) Remove(filepath string) error {
 		return errors.Wrap(err, "storage.remove")
 	}
 
-	_, err := i.s3.DeleteObject(input)
-	if err != nil {
+	if _, err := i.s3.DeleteObject(input); err != nil {
 		return errors.Wrap(err, "storage.remove")
 	}
 
@@ -113,12 +97,17 @@ func (i *Interactor) FileURL(filepath string) string {
 
 // Create multipart upload
 func (i *Interactor) CreateMultipartUpload(filename, contentType string, acl ACL) (string, error) {
-	result, err := i.s3.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
+	input := &s3.CreateMultipartUploadInput{
 		ACL:         aws.String(acl.String()),
 		Bucket:      aws.String(i.bucket),
 		Key:         aws.String(filename),
 		ContentType: aws.String(contentType),
-	})
+	}
+	if err := input.Validate(); err != nil {
+		return "", errors.Wrap(err, "storage.createMultipartUpload: invalid params")
+	}
+
+	result, err := i.s3.CreateMultipartUpload(input)
 	if err != nil {
 		return "", errors.Wrap(err, "storage.createMultipartUpload")
 	}
