@@ -5,19 +5,41 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/pkg/errors"
 )
 
-// Interactor struct
-type Interactor struct {
-	s3             *s3.S3
-	bucket         string
-	url            string
-	forcePathStyle bool
+type (
+	// Interactor struct
+	Interactor struct {
+		s3             *s3.S3
+		bucket         string
+		fileEndpoint   string
+		forcePathStyle bool
+	}
+
+	// CompletedPart represents a part of a multipart upload.
+	CompletedPart interface {
+		PartNumber() int64
+		ETag() string
+	}
+
+	completedPart struct {
+		partNumber int64
+		etag       string
+	}
+)
+
+// PartNumber returns the part number.
+func (p *completedPart) PartNumber() int64 {
+	return p.partNumber
+}
+
+// ETag returns the ETag.
+func (p *completedPart) ETag() string {
+	return p.etag
 }
 
 // New is a factory function,
@@ -26,7 +48,7 @@ func New(s3Client *s3.S3, bucket, fileEndpoint string) *Interactor {
 	return &Interactor{
 		s3:             s3Client,
 		bucket:         bucket,
-		url:            fileEndpoint,
+		fileEndpoint:   fileEndpoint,
 		forcePathStyle: *s3Client.Config.S3ForcePathStyle,
 	}
 }
@@ -69,18 +91,18 @@ func (i *Interactor) Download(filepath string) (io.ReadCloser, *string, error) {
 	return result.Body, result.ContentType, nil
 }
 
-// Remove file from the cloud storage
-func (i *Interactor) Remove(filepath string) error {
+// Delete file from the cloud storage
+func (i *Interactor) Delete(filepath string) error {
 	input := &s3.DeleteObjectInput{
 		Bucket: aws.String(i.bucket),
 		Key:    aws.String(filepath),
 	}
 	if err := input.Validate(); err != nil {
-		return errors.Wrap(err, "storage.remove")
+		return errors.Wrap(err, "storage.delete")
 	}
 
 	if _, err := i.s3.DeleteObject(input); err != nil {
-		return errors.Wrap(err, "storage.remove")
+		return errors.Wrap(err, "storage.delete")
 	}
 
 	return nil
@@ -89,10 +111,10 @@ func (i *Interactor) Remove(filepath string) error {
 // FileURL return public url for a file
 func (i *Interactor) FileURL(filepath string) string {
 	if i.forcePathStyle {
-		return fmt.Sprintf("%s/%s/%s", i.url, i.bucket, filepath)
+		return fmt.Sprintf("%s/%s/%s", i.fileEndpoint, i.bucket, filepath)
 	}
 
-	return fmt.Sprintf("%s/%s", i.url, filepath)
+	return fmt.Sprintf("%s/%s", i.fileEndpoint, filepath)
 }
 
 // Create multipart upload
@@ -141,7 +163,7 @@ func (i *Interactor) AbortMultipartUpload(filename, uploadID string) error {
 }
 
 // CompleteMultipartUpload completes a multipart upload.
-func (i *Interactor) CompleteMultipartUpload(filename, uploadID string, completedParts ...*s3.CompletedPart) error {
+func (i *Interactor) CompleteMultipartUpload(filename, uploadID string, completedParts ...CompletedPart) error {
 	if uploadID == "" {
 		return ErrMissedUploadID
 	}
@@ -151,14 +173,23 @@ func (i *Interactor) CompleteMultipartUpload(filename, uploadID string, complete
 
 	// Ordering the array based on the PartNumber as each parts could be uploaded in different order!
 	sort.Slice(completedParts, func(i, j int) bool {
-		return *completedParts[i].PartNumber < *completedParts[j].PartNumber
+		return completedParts[i].PartNumber() < completedParts[j].PartNumber()
 	})
+
+	// Converting the CompletedPart to s3.CompletedPart
+	parts := make([]*s3.CompletedPart, len(completedParts))
+	for i, part := range completedParts {
+		parts[i] = &s3.CompletedPart{
+			ETag:       aws.String(part.ETag()),
+			PartNumber: aws.Int64(part.PartNumber()),
+		}
+	}
 
 	params := &s3.CompleteMultipartUploadInput{
 		Bucket:          aws.String(i.bucket),
 		Key:             aws.String(filename),
 		UploadId:        aws.String(uploadID),
-		MultipartUpload: &s3.CompletedMultipartUpload{Parts: completedParts},
+		MultipartUpload: &s3.CompletedMultipartUpload{Parts: parts},
 	}
 	if err := params.Validate(); err != nil {
 		return errors.Wrap(err, "storage.completeMultipartUpload: invalid params")
@@ -174,7 +205,7 @@ func (i *Interactor) CompleteMultipartUpload(filename, uploadID string, complete
 // Upload uploads a file to S3.
 // If partNum is equal to totalParts, the file is considered complete and the
 // multipart upload is completed.
-func (i *Interactor) UploadPart(filename, uploadID string, data []byte, partNum, totalParts int64) (*s3.CompletedPart, error) {
+func (i *Interactor) UploadPart(filename, uploadID string, data []byte, partNum, totalParts int64) (CompletedPart, error) {
 	if uploadID == "" {
 		return nil, ErrMissedUploadID
 	}
@@ -202,8 +233,8 @@ func (i *Interactor) UploadPart(filename, uploadID string, data []byte, partNum,
 		return nil, errors.Wrap(err, "storage.uploadPart")
 	}
 
-	return &s3.CompletedPart{
-		ETag:       aws.String(strings.Trim(*partResp.ETag, "\"")),
-		PartNumber: aws.Int64(partNum),
+	return &completedPart{
+		etag:       *partResp.ETag,
+		partNumber: partNum,
 	}, nil
 }

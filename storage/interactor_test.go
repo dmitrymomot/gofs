@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/dmitrymomot/go-env"
 	"github.com/dmitrymomot/gofs/storage"
 	"github.com/google/uuid"
@@ -112,7 +111,7 @@ func TestSimpleFileInteraction(t *testing.T) {
 
 	t.Run("Delete", func(t *testing.T) {
 		// Delete file from storage.
-		require.NoError(t, interactor.Remove(filepath))
+		require.NoError(t, interactor.Delete(filepath))
 
 		// Check if file was deleted
 		_, _, err := interactor.Download(filepath)
@@ -156,7 +155,7 @@ func TestMultipartUpload(t *testing.T) {
 		var start, currentSize int64
 		remaining := len(fileBytes)
 		partNum := int64(1)
-		completedParts := make([]*s3.CompletedPart, 0, totalParts)
+		completedParts := make([]storage.CompletedPart, 0, totalParts)
 
 		for start = 0; remaining > 0; start += maxPartSize {
 			if remaining > int(maxPartSize) {
@@ -196,7 +195,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("Delete", func(t *testing.T) {
 		// Delete file from storage.
-		require.NoError(t, interactor.Remove(filepath))
+		require.NoError(t, interactor.Delete(filepath))
 
 		// Check if file was deleted
 		_, _, err := interactor.Download(filepath)
